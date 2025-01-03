@@ -42,12 +42,15 @@ require_once MACP_PLUGIN_DIR . 'includes/minify/class-macp-minify-css.php';
 require_once MACP_PLUGIN_DIR . 'includes/minify/class-macp-minify-js.php';
 require_once MACP_PLUGIN_DIR . 'includes/minify/class-macp-minify-html.php';
 
-// Load CSS optimization classes
-require_once MACP_PLUGIN_DIR . 'includes/css/class-macp-css-progress.php';  // Add this line
+// Load CSS optimization classes first since other modules depend on them
 require_once MACP_PLUGIN_DIR . 'includes/css/class-macp-css-config.php';
 require_once MACP_PLUGIN_DIR . 'includes/css/class-macp-css-extractor.php';
+require_once MACP_PLUGIN_DIR . 'includes/css/optimizers/class-macp-css-file-optimizer.php';
+require_once MACP_PLUGIN_DIR . 'includes/css/optimizers/class-macp-css-inline-optimizer.php';
+require_once MACP_PLUGIN_DIR . 'includes/css/storage/class-macp-css-cache-manager.php';
+require_once MACP_PLUGIN_DIR . 'includes/css/processors/class-macp-html-css-processor.php';
 require_once MACP_PLUGIN_DIR . 'includes/css/class-macp-css-optimizer.php';
-require_once MACP_PLUGIN_DIR . 'includes/css/class-macp-css-minifier.php';
+
 
 // Load JavaScript optimization classes
 require_once MACP_PLUGIN_DIR . 'includes/js/class-macp-script-attributes.php';

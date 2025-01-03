@@ -20,6 +20,7 @@ class MACP_Plugin {
     private $metrics_calculator;
     private $metrics_display;
     private $lazy_load;
+    private $css_optimizer;
 
     public static function get_instance() {
         if (null === self::$instance) {
@@ -36,6 +37,13 @@ class MACP_Plugin {
     // Register activation and deactivation hooks
     register_activation_hook(MACP_PLUGIN_FILE, [$this, 'activate']);
     register_deactivation_hook(MACP_PLUGIN_FILE, [$this, 'deactivate']);
+      
+    // Initialize CSS optimizer first
+        if (get_option('macp_remove_unused_css', 0)) {
+            $this->css_optimizer = new MACP_CSS_Optimizer();
+            add_filter('the_content', [$this->css_optimizer, 'optimize_css'], 999);
+            add_action('wp_footer', [$this, 'process_full_page'], 999999);
+        } 
 
     // Initialize settings manager first
     $this->settings_manager = new MACP_Settings_Manager();
@@ -55,6 +63,9 @@ class MACP_Plugin {
     $this->metrics_collector = new MACP_Metrics_Collector($this->redis);
     $this->metrics_calculator = new MACP_Metrics_Calculator($this->redis);
     $this->metrics_display = new MACP_Metrics_Display($this->metrics_calculator);
+      
+      
+      
 
     // Initialize other components
     $this->html_cache = new MACP_HTML_Cache($this->redis, $this->metrics_collector);
@@ -71,6 +82,14 @@ class MACP_Plugin {
             $this->css_minifier = new MACP_CSS_Minifier();
             add_filter('style_loader_tag', [$this->css_minifier, 'process_stylesheet'], 10, 4);
         }
+      
+      
+        // Initialize CSS optimizer and add filter for HTML processing
+        if (get_option('macp_remove_unused_css', 0)) {
+            $this->css_optimizer = new MACP_CSS_Optimizer();
+            add_filter('final_output', [$this->css_optimizer, 'optimize_css'], 10);
+          
+          }
     
     // Initialize Varnish if enabled
     if (get_option('macp_enable_varnish', 0)) {
@@ -105,6 +124,14 @@ class MACP_Plugin {
         }
     }
 
+  
+     public function process_full_page() {
+        if ($this->css_optimizer && get_option('macp_remove_unused_css', 0)) {
+            ob_start([$this->css_optimizer, 'optimize_css']);
+        }
+    }
+  
+  
      public function activate() {
         // Create cache directories
         $cache_dirs = [

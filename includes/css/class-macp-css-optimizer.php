@@ -1,17 +1,24 @@
 <?php
 require_once MACP_PLUGIN_DIR . 'includes/css/class-macp-css-config.php';
 require_once MACP_PLUGIN_DIR . 'includes/css/class-macp-css-extractor.php';
-
-use MatthiasMullie\Minify;
+require_once MACP_PLUGIN_DIR . 'includes/css/optimizers/class-macp-css-file-optimizer.php';
+require_once MACP_PLUGIN_DIR . 'includes/css/optimizers/class-macp-css-inline-optimizer.php';
+require_once MACP_PLUGIN_DIR . 'includes/css/storage/class-macp-css-cache-manager.php';
+require_once MACP_PLUGIN_DIR . 'includes/css/processors/class-macp-html-css-processor.php';
 
 class MACP_CSS_Optimizer {
-    private $cache_dir;
+    private $file_optimizer;
+    private $inline_optimizer;
+    private $cache_manager;
+    private $html_processor;
+    private $debug;
 
     public function __construct() {
-        $this->cache_dir = WP_CONTENT_DIR . '/cache/macp/css/';
-        if (!file_exists($this->cache_dir)) {
-            wp_mkdir_p($this->cache_dir);
-        }
+        $this->file_optimizer = new MACP_CSS_File_Optimizer();
+        $this->inline_optimizer = new MACP_CSS_Inline_Optimizer();
+        $this->cache_manager = new MACP_CSS_Cache_Manager();
+        $this->html_processor = new MACP_HTML_CSS_Processor();
+        $this->debug = new MACP_Debug();
     }
 
     public function optimize_css($html) {
@@ -20,91 +27,52 @@ class MACP_CSS_Optimizer {
         }
 
         try {
+            $this->debug->log("Starting CSS optimization");
+
             // Extract CSS files and inline styles
             $css_files = MACP_CSS_Extractor::extract_css_files($html);
             $inline_styles = MACP_CSS_Extractor::extract_inline_styles($html);
             
-            // Create new minifier instance
-            $minifier = new Minify\CSS();
-            
-            // Process external CSS files
-            $processed_files = [];
-            foreach ($css_files as $css_url) {
-                if ($this->should_process_css($css_url)) {
-                    $css_content = MACP_CSS_Extractor::get_css_content($css_url);
-                    if ($css_content) {
-                        $minifier->add($css_content);
-                        $processed_files[] = $css_url;
-                    }
-                }
+            if (empty($css_files) && empty($inline_styles)) {
+                $this->debug->log("No CSS found to optimize");
+                return $html;
             }
 
-            // Process inline styles
-            foreach ($inline_styles as $style) {
-                $minifier->add($style);
+            // Optimize CSS files
+            $file_result = $this->file_optimizer->optimize_files($css_files);
+            
+            // Optimize inline styles
+            $inline_css = $this->inline_optimizer->optimize_inline_styles($inline_styles);
+
+            // Combine optimized CSS
+            $optimized_css = $file_result['content'] . "\n" . $inline_css;
+            
+            if (empty($optimized_css)) {
+                $this->debug->log("No CSS content after optimization");
+                return $html;
             }
 
-            // Minify all CSS
-            $optimized_css = $minifier->minify();
-            
             // Save optimized CSS
-            $cache_key = md5($optimized_css);
-            $optimized_file = $this->cache_dir . 'optimized_' . $cache_key . '.css';
-            
-            if (!file_exists($optimized_file)) {
-                file_put_contents($optimized_file, $optimized_css);
+            $cache_key = $this->cache_manager->save_optimized_css($optimized_css);
+            if (!$cache_key) {
+                return $html;
             }
 
-            // Get the URL for the optimized file
-            $optimized_url = str_replace(WP_CONTENT_DIR, content_url(), $optimized_file);
+            // Process HTML
+            $html = $this->html_processor->remove_processed_files($html, $file_result['processed_files']);
+            $html = $this->html_processor->remove_inline_styles($html);
+            $html = $this->html_processor->add_optimized_css_link($html, $this->cache_manager->get_optimized_url($cache_key));
 
-            // Remove original CSS files and collect link tags
-            $link_tags = [];
-            foreach ($processed_files as $original_file) {
-                preg_match('/<link[^>]+href=[\'"]' . preg_quote($original_file, '/') . '[\'"][^>]*>/i', $html, $matches);
-                if (!empty($matches[0])) {
-                    $link_tags[] = $matches[0];
-                }
-            }
-
-            // Remove all matched link tags
-            foreach ($link_tags as $tag) {
-                $html = str_replace($tag, '', $html);
-            }
-
-            // Remove inline styles
-            $html = preg_replace('/<style[^>]*>.*?<\/style>/is', '', $html);
-
-            // Add optimized CSS file right after opening head tag
-            $html = preg_replace(
-                '/(<head[^>]*>)/i',
-                '$1' . PHP_EOL . '<link rel="stylesheet" href="' . esc_attr($optimized_url) . '" />',
-                $html
-            );
-
+            $this->debug->log("CSS optimization completed successfully");
             return $html;
+
         } catch (Exception $e) {
-            MACP_Debug::log("CSS optimization error: " . $e->getMessage());
+            $this->debug->log("CSS optimization error: " . $e->getMessage());
             return $html;
         }
-    }
-
-    private function should_process_css($url) {
-        if (!get_option('macp_process_external_css', 0) && !MACP_CSS_Extractor::is_local_url($url)) {
-            return false;
-        }
-
-        foreach (MACP_CSS_Config::get_excluded_patterns() as $pattern) {
-            if (strpos($url, $pattern) !== false) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     public function clear_css_cache() {
-        array_map('unlink', glob($this->cache_dir . '*'));
-        MACP_Debug::log("CSS cache cleared");
+        $this->cache_manager->clear_cache();
     }
 }
